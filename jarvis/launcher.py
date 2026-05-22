@@ -6,7 +6,6 @@ Run with: python jarvis.py
 """
 
 import sys
-import os
 
 def main():
     """Main launcher function"""
@@ -17,7 +16,7 @@ def main():
         print("[✓] GUI available - launching Jarvis with graphical interface...")
         
         # Import and run GUI
-        from jarvis_gui import run_gui
+        from jarvis.ui import run_gui
         run_gui()
         
     except ImportError:
@@ -26,7 +25,7 @@ def main():
         print()
         
         # Fallback to terminal
-        from jarvis_main import Jarvis
+        from jarvis.core import Jarvis
         jarvis = Jarvis()
         jarvis.run()
 

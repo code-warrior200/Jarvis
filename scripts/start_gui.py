@@ -5,12 +5,16 @@ Simply run this to launch the beautiful Jarvis interface!
 """
 
 import sys
-import os
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 def start_gui():
     """Start Jarvis GUI application"""
     try:
-        from jarvis_gui import JarvisGUI
+        from jarvis.ui import JarvisGUI
         import tkinter as tk
         
         print("🚀 Launching Jarvis GUI...\n")

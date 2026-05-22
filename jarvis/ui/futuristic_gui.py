@@ -6,17 +6,12 @@ Inspired by Tony Stark's JARVIS from Iron Man
 """
 
 import tkinter as tk
-from tkinter import scrolledtext, messagebox, ttk
+from tkinter import messagebox, scrolledtext
 import threading
 import sys
-import os
 from datetime import datetime
-from pathlib import Path
-import math
-import random
 
-sys.path.insert(0, os.path.dirname(__file__))
-from jarvis_main import Jarvis, WindowManager, SystemControl
+from jarvis.core import Jarvis
 
 
 
@@ -408,6 +403,9 @@ def run_gui():
     app = FuturisticGUI(root)
     root.protocol("WM_DELETE_WINDOW", app.quit_app)
     root.mainloop()
+
+
+JarvisGUI = FuturisticGUI
 
 
 if __name__ == "__main__":

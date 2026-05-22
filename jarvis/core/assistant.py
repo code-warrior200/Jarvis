@@ -59,7 +59,7 @@ try:
 except ImportError:
     psutil = None
 
-DATA_FILE = Path(__file__).with_name('jarvis_data.json')
+DATA_FILE = Path(__file__).resolve().parents[2] / 'jarvis_data.json'
 
 
 class LocalLLM:
