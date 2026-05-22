@@ -1,0 +1,9 @@
+pyttsx3
+SpeechRecognition
+pyaudio
+opencv-python
+requests
+transformers
+pygetwindow
+pyautogui
+psutil
