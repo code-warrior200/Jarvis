@@ -336,10 +336,13 @@ class SystemControl:
 class Jarvis:
     def __init__(self, gui_callback=None):
         self.voice_enabled = bool(pyttsx3)
+        self.tts_engine = None
+        self.tts_voice_name = None
         self.recognizer = sr.Recognizer() if sr else None
         self.microphone_available = False
         self.user_name = None
         self.gui_callback = gui_callback  # Callback for GUI updates
+        self.configure_voice()
         if self.recognizer and sr:
             try:
                 with sr.Microphone() as source:
@@ -375,6 +378,84 @@ class Jarvis:
             'system': self.system_info_command,
         }
 
+    def configure_voice(self):
+        """Configure text-to-speech, preferring African female voices when installed."""
+        if not pyttsx3:
+            self.voice_enabled = False
+            return
+
+        try:
+            self.tts_engine = pyttsx3.init()
+            voices = self.tts_engine.getProperty('voices') or []
+            selected_voice = self.select_voice(voices)
+            if selected_voice:
+                self.tts_engine.setProperty('voice', selected_voice.id)
+                self.tts_voice_name = getattr(selected_voice, 'name', None) or selected_voice.id
+
+            self.tts_engine.setProperty('rate', int(os.getenv('JARVIS_VOICE_RATE', '170')))
+            self.tts_engine.setProperty('volume', float(os.getenv('JARVIS_VOICE_VOLUME', '1.0')))
+            self.voice_enabled = True
+        except Exception as e:
+            logging.warning('Text-to-speech unavailable: %s', e)
+            self.tts_engine = None
+            self.tts_voice_name = None
+            self.voice_enabled = False
+
+    def select_voice(self, voices):
+        """Pick the best voice from installed voices.
+
+        Set JARVIS_VOICE_NAME to force a specific installed voice by name or id.
+        """
+        if not voices:
+            return None
+
+        preferred = os.getenv('JARVIS_VOICE_NAME', '').strip().lower()
+        if preferred:
+            for voice in voices:
+                searchable = self.voice_search_text(voice)
+                if preferred in searchable:
+                    return voice
+
+        best_voice = None
+        best_score = -1
+        for voice in voices:
+            searchable = self.voice_search_text(voice)
+            score = 0
+
+            for token in (
+                'female', 'woman', 'zira', 'hazel', 'susan', 'heera',
+                'abeo', 'ebun', 'amina', 'asili', 'aslia', 'zuri',
+            ):
+                if token in searchable:
+                    score += 5
+
+            for token in (
+                'africa', 'african', 'nigeria', 'ghana', 'kenya',
+                'south africa', 'tanzania', 'uganda', 'en-ng', 'en-ke',
+                'en-za', 'en-gh', 'sw-ke', 'sw-tz',
+            ):
+                if token in searchable:
+                    score += 10
+
+            if 'english' in searchable or 'en_' in searchable or 'en-' in searchable:
+                score += 2
+
+            if score > best_score:
+                best_score = score
+                best_voice = voice
+
+        return best_voice
+
+    @staticmethod
+    def voice_search_text(voice):
+        parts = [
+            str(getattr(voice, 'id', '')),
+            str(getattr(voice, 'name', '')),
+            str(getattr(voice, 'languages', '')),
+            str(getattr(voice, 'gender', '')),
+        ]
+        return ' '.join(parts).lower()
+
     def load_data(self):
         if DATA_FILE.exists():
             try:
@@ -390,13 +471,12 @@ class Jarvis:
         print('Jarvis:', text)
         if self.gui_callback:
             self.gui_callback("Jarvis", text)
-        if self.voice_enabled:
+        if self.voice_enabled and self.tts_engine:
             try:
-                engine = pyttsx3.init()
-                engine.say(text)
-                engine.runAndWait()
-            except Exception:
-                pass
+                self.tts_engine.say(text)
+                self.tts_engine.runAndWait()
+            except Exception as e:
+                logging.warning('Text-to-speech failed: %s', e)
 
     def listen(self):
         if not self.recognizer or not sr:

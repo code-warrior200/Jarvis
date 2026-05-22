@@ -493,10 +493,12 @@ class FuturisticGUI:
         if not self.jarvis:
             return
         if self.jarvis.microphone_available:
-            self.voice_status.config(text="Voice: ready", fg=self.colors["green"])
+            tts = self.jarvis.tts_voice_name or "system default"
+            self.voice_status.config(text=f"Voice: ready\nTTS: {tts}", fg=self.colors["green"])
             self.listen_btn.config(state=tk.NORMAL)
         else:
-            self.voice_status.config(text="Voice: unavailable", fg=self.colors["red"])
+            tts = self.jarvis.tts_voice_name or "unavailable"
+            self.voice_status.config(text=f"Voice: unavailable\nTTS: {tts}", fg=self.colors["red"])
             self.listen_btn.config(state=tk.DISABLED, bg=self.colors["surface_alt"], fg=self.colors["muted"])
 
     def refresh_status(self):

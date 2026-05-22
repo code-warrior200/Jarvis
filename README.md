@@ -64,6 +64,17 @@ $env:JARVIS_LOCAL_MODEL_PATH = "C:\models\llama-2-7b"
 python run.py
 ```
 
+## Voice Selection
+
+Jarvis uses `pyttsx3` and automatically prefers installed African female voices. You can force a specific installed voice with:
+
+```powershell
+$env:JARVIS_VOICE_NAME = "Abeo"
+python run.py
+```
+
+Other useful matches include `Nigeria`, `Kenya`, `South Africa`, `Zira`, `Hazel`, `Susan`, `Heera`, or `Female`, depending on which Windows/SAPI voices are installed.
+
 ## Notes
 
 Runtime data is stored in `jarvis_data.json` at the project root and is ignored by git. Generated caches, virtual environments, build outputs, and local environment files are also ignored.

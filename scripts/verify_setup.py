@@ -81,6 +81,26 @@ def check_jarvis_core():
         return False
 
 
+def check_tts_engine():
+    """Check whether the configured text-to-speech engine can initialize."""
+    print("\nChecking text-to-speech engine...")
+
+    try:
+        from jarvis import Jarvis
+
+        jarvis = Jarvis()
+        if jarvis.voice_enabled:
+            voice = jarvis.tts_voice_name or "system default"
+            print(f"   OK  text-to-speech ready: {voice}")
+            return True
+        print("   WARN text-to-speech engine unavailable")
+        print("        Install/repair Windows speech voices or set JARVIS_VOICE_NAME after installing a voice.")
+        return True
+    except Exception as exc:
+        print(f"   WARN text-to-speech check failed: {exc}")
+        return True
+
+
 def main():
     """Run all checks."""
     print("=" * 60)
@@ -96,6 +116,8 @@ def main():
 
     if not check_jarvis_core():
         all_good = False
+
+    check_tts_engine()
 
     print("\n" + "=" * 60)
     if all_good:
