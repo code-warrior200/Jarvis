@@ -1,6 +1,6 @@
 # Jarvis AI Assistant
 
-Jarvis is a local Python assistant with a Tkinter GUI, terminal fallback, voice input, text-to-speech responses, app/window controls, reminders, weather lookup, web search, and optional local LLM support.
+Jarvis is a local voice-command assistant with a Tkinter GUI, terminal fallback, speech input, text-to-speech responses, app/window controls, reminders, weather lookup, web search, and optional local LLM support.
 
 ## Quick Start
 
@@ -29,7 +29,7 @@ Jarvis/
 │   ├── core/
 │   │   └── assistant.py          # Core assistant engine
 │   ├── ui/
-│   │   └── futuristic_gui.py     # Tkinter GUI
+│   │   └── futuristic_gui.py     # Voice-only Tkinter GUI
 │   ├── launcher.py               # GUI-first launcher with terminal fallback
 │   └── __main__.py               # python -m jarvis entry point
 ├── scripts/

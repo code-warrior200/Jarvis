@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple interactive Jarvis GUI."""
+"""Voice-only eDEX-inspired Jarvis GUI."""
 
 from __future__ import annotations
 
@@ -20,406 +20,438 @@ except ImportError:  # pragma: no cover - optional runtime dependency
 
 
 class FuturisticGUI:
-    """Conversation-first assistant UI with clear voice controls."""
+    """Voice-first assistant UI styled after eDEX-UI."""
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Jarvis Assistant")
-        self.root.geometry("1180x760")
-        self.root.minsize(960, 640)
+        self.root.title("JARVIS // VOICE TERMINAL")
+        self.root.geometry("1360x820")
+        self.root.minsize(1100, 700)
 
         self.colors = {
-            "app": "#0b1117",
-            "surface": "#111a22",
-            "surface_alt": "#16232d",
-            "border": "#243746",
-            "text": "#edf7fa",
-            "muted": "#8da3ad",
-            "cyan": "#31d7e8",
-            "green": "#42d984",
-            "amber": "#ffb454",
-            "red": "#ff5d73",
-            "input": "#071017",
+            "app": "#02070c",
+            "surface": "#06131b",
+            "surface_alt": "#081c26",
+            "input": "#000b10",
+            "border": "#0b5165",
+            "border_dim": "#14313d",
+            "text": "#d8fbff",
+            "muted": "#69919b",
+            "cyan": "#19f4f2",
+            "cyan_dim": "#32a9b7",
+            "green": "#4dff91",
+            "amber": "#ffb020",
+            "red": "#ff4d6d",
+            "black": "#00070b",
         }
 
         self.jarvis: Jarvis | None = None
         self.listening = False
         self.executing = False
-        self.keep_listening = tk.BooleanVar(value=False)
+        self.keep_listening = tk.BooleanVar(value=True)
+        self.stat_labels: dict[str, tk.Label] = {}
+        self.pulse = False
 
         self.root.configure(bg=self.colors["app"])
         self.build_ui()
-        self.set_state("Starting Jarvis...", "Initializing assistant modules.", "amber")
-        self.add_message("Jarvis", "Starting up. You can type a command while voice loads.", "assistant")
+        self.set_state("BOOTING", "VOICE KERNEL INITIALIZING", "amber")
+        self.add_message("JARVIS", "Voice command terminal online. Initializing modules.", "assistant")
 
         threading.Thread(target=self.init_jarvis, daemon=True).start()
         self.refresh_status()
+        self.animate()
 
     def init_jarvis(self):
         """Initialize the assistant engine without blocking the window."""
         try:
             self.jarvis = Jarvis(gui_callback=self.display_message)
-            voice_text = "Voice input is ready." if self.jarvis.microphone_available else (
-                "Text mode is ready. Connect a microphone to use voice."
-            )
-            self.add_message("Jarvis", voice_text, "assistant")
-            self.root.after(0, lambda: self.set_state("Ready", "Ask me by voice or text.", "green"))
+            if self.jarvis.microphone_available:
+                self.add_message("JARVIS", "Microphone channel ready. Say a command after pressing SPEAK.", "assistant")
+                self.root.after(0, lambda: self.set_state("READY", "PRESS SPEAK // ISSUE VOICE COMMAND", "green"))
+            else:
+                self.add_message("SYSTEM", "No microphone detected. Voice-only mode requires a microphone.", "error")
+                self.root.after(0, lambda: self.set_state("NO MIC", "CONNECT MICROPHONE TO CONTINUE", "red"))
             self.root.after(0, self.update_voice_availability)
         except Exception as exc:
-            self.add_message("System", f"Jarvis could not start: {exc}", "error")
-            self.root.after(0, lambda: self.set_state("Startup failed", "Check dependencies and logs.", "red"))
+            self.add_message("SYSTEM", f"Jarvis could not start: {exc}", "error")
+            self.root.after(0, lambda: self.set_state("FAULT", "STARTUP FAILED", "red"))
 
     def build_ui(self):
-        """Build a simpler assistant layout."""
+        """Build an eDEX-style voice command cockpit."""
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(1, weight=1)
 
         self.build_header()
 
-        content = tk.Frame(self.root, bg=self.colors["app"])
-        content.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
-        content.grid_columnconfigure(0, weight=1)
-        content.grid_columnconfigure(1, minsize=300)
-        content.grid_rowconfigure(0, weight=1)
+        body = tk.Frame(self.root, bg=self.colors["app"])
+        body.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 12))
+        body.grid_columnconfigure(0, minsize=260)
+        body.grid_columnconfigure(1, weight=1)
+        body.grid_columnconfigure(2, minsize=330)
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_rowconfigure(1, minsize=98)
 
-        self.build_conversation(content)
-        self.build_side_panel(content)
-        self.build_input_bar()
+        self.build_command_examples(body)
+        self.build_terminal(body)
+        self.build_telemetry(body)
+        self.build_voice_deck(body)
 
     def build_header(self):
-        header = tk.Frame(self.root, bg=self.colors["app"])
-        header.grid(row=0, column=0, sticky="ew", padx=18, pady=18)
+        header = tk.Frame(self.root, bg=self.colors["app"], height=88)
+        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 10))
         header.grid_columnconfigure(1, weight=1)
+        header.grid_propagate(False)
 
-        orb = tk.Canvas(
+        self.orb = tk.Canvas(
             header,
-            width=56,
-            height=56,
+            width=68,
+            height=68,
             bg=self.colors["app"],
-            highlightthickness=0,
+            highlightthickness=1,
+            highlightbackground=self.colors["border"],
         )
-        orb.grid(row=0, column=0, sticky="w")
-        self.voice_ring = orb.create_oval(7, 7, 49, 49, outline=self.colors["cyan"], width=3)
-        self.voice_core = orb.create_oval(20, 20, 36, 36, fill=self.colors["amber"], width=0)
-        self.orb = orb
+        self.orb.grid(row=0, column=0, sticky="w")
+        self.voice_ring = self.orb.create_oval(9, 9, 59, 59, outline=self.colors["cyan"], width=2)
+        self.voice_core = self.orb.create_oval(26, 26, 42, 42, fill=self.colors["amber"], width=0)
+        self.orb.create_line(34, 4, 34, 64, fill=self.colors["border_dim"])
+        self.orb.create_line(4, 34, 64, 34, fill=self.colors["border_dim"])
 
         title = tk.Frame(header, bg=self.colors["app"])
-        title.grid(row=0, column=1, sticky="ew", padx=14)
+        title.grid(row=0, column=1, sticky="ew", padx=16)
 
         tk.Label(
             title,
-            text="Jarvis",
-            font=("Segoe UI", 24, "bold"),
-            fg=self.colors["text"],
+            text="JARVIS",
+            font=("Consolas", 30, "bold"),
+            fg=self.colors["cyan"],
             bg=self.colors["app"],
         ).pack(anchor="w")
         tk.Label(
             title,
-            text="Voice assistant for apps, windows, search, reminders, weather, and system tasks",
-            font=("Segoe UI", 10),
+            text="VOICE-ONLY EDEX COMMAND INTERFACE // LOCAL ASSISTANT NODE",
+            font=("Consolas", 10, "bold"),
             fg=self.colors["muted"],
             bg=self.colors["app"],
         ).pack(anchor="w")
 
-        status_box = tk.Frame(
-            header,
+        status = self.panel(header, width=330)
+        status.grid(row=0, column=2, sticky="e")
+        status.grid_columnconfigure(0, weight=1)
+
+        self.clock_label = tk.Label(
+            status,
+            text="--:--:--",
+            font=("Consolas", 20, "bold"),
+            fg=self.colors["cyan"],
             bg=self.colors["surface"],
-            highlightthickness=1,
-            highlightbackground=self.colors["border"],
         )
-        status_box.grid(row=0, column=2, sticky="e")
-        status_box.grid_columnconfigure(0, weight=1)
+        self.clock_label.grid(row=0, column=0, sticky="ew", padx=12, pady=(9, 0))
 
         self.state_label = tk.Label(
-            status_box,
-            text="Starting",
-            font=("Segoe UI", 12, "bold"),
+            status,
+            text="BOOT",
+            font=("Consolas", 11, "bold"),
             fg=self.colors["amber"],
             bg=self.colors["surface"],
-            width=18,
         )
-        self.state_label.grid(row=0, column=0, sticky="ew", padx=14, pady=(8, 0))
+        self.state_label.grid(row=1, column=0, sticky="ew", padx=12)
 
         self.state_detail = tk.Label(
-            status_box,
-            text="Loading...",
-            font=("Segoe UI", 9),
+            status,
+            text="INITIALIZING",
+            font=("Consolas", 9),
             fg=self.colors["muted"],
             bg=self.colors["surface"],
-            width=32,
         )
-        self.state_detail.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 8))
+        self.state_detail.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 9))
 
-    def build_conversation(self, parent: tk.Frame):
-        conversation = tk.Frame(
-            parent,
+    def build_command_examples(self, parent: tk.Frame):
+        rail = self.panel(parent)
+        rail.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        rail.grid_columnconfigure(0, weight=1)
+
+        self.section_title(rail, "VOICE COMMANDS").grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 8))
+
+        examples = [
+            ("SYSTEM", "system info"),
+            ("APPS", "open notepad"),
+            ("WINDOWS", "list windows"),
+            ("FOCUS", "focus chrome"),
+            ("WEATHER", "weather in Lagos"),
+            ("SEARCH", "search for Python documentation"),
+            ("REMINDER", "remind me to stretch in 10 minutes"),
+            ("HELP", "help"),
+        ]
+        for index, (group, phrase) in enumerate(examples, start=1):
+            card = tk.Frame(
+                rail,
+                bg=self.colors["surface_alt"],
+                highlightthickness=1,
+                highlightbackground=self.colors["border_dim"],
+            )
+            card.grid(row=index, column=0, sticky="ew", padx=12, pady=4)
+            card.grid_columnconfigure(0, weight=1)
+
+            tk.Label(
+                card,
+                text=group,
+                font=("Consolas", 8, "bold"),
+                fg=self.colors["amber"],
+                bg=self.colors["surface_alt"],
+                anchor="w",
+            ).grid(row=0, column=0, sticky="ew", padx=10, pady=(7, 0))
+            tk.Label(
+                card,
+                text=f"> {phrase}",
+                font=("Consolas", 9),
+                fg=self.colors["text"],
+                bg=self.colors["surface_alt"],
+                anchor="w",
+                wraplength=210,
+            ).grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
+
+        self.section_title(rail, "MODE").grid(row=10, column=0, sticky="ew", padx=12, pady=(18, 8))
+        self.voice_status = tk.Label(
+            rail,
+            text="VOICE: CHECKING\nTTS: CHECKING",
+            font=("Consolas", 9, "bold"),
+            fg=self.colors["amber"],
             bg=self.colors["surface"],
-            highlightthickness=1,
-            highlightbackground=self.colors["border"],
+            justify=tk.LEFT,
+            anchor="w",
         )
-        conversation.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        conversation.grid_columnconfigure(0, weight=1)
-        conversation.grid_rowconfigure(1, weight=1)
+        self.voice_status.grid(row=11, column=0, sticky="ew", padx=12, pady=(0, 8))
+
+        follow = tk.Checkbutton(
+            rail,
+            text="CONTINUOUS LISTEN",
+            variable=self.keep_listening,
+            bg=self.colors["surface"],
+            fg=self.colors["text"],
+            activebackground=self.colors["surface"],
+            activeforeground=self.colors["cyan"],
+            selectcolor=self.colors["black"],
+            font=("Consolas", 9, "bold"),
+            anchor="w",
+        )
+        follow.grid(row=12, column=0, sticky="ew", padx=8, pady=(0, 8))
+
+    def build_terminal(self, parent: tk.Frame):
+        terminal = self.panel(parent)
+        terminal.grid(row=0, column=1, sticky="nsew")
+        terminal.grid_columnconfigure(0, weight=1)
+        terminal.grid_rowconfigure(1, weight=1)
+
+        head = tk.Frame(terminal, bg=self.colors["surface"])
+        head.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
+        head.grid_columnconfigure(1, weight=1)
 
         tk.Label(
-            conversation,
-            text="Conversation",
-            font=("Segoe UI", 13, "bold"),
-            fg=self.colors["text"],
+            head,
+            text="[ TRANSCRIPT ]",
+            font=("Consolas", 11, "bold"),
+            fg=self.colors["cyan"],
             bg=self.colors["surface"],
-            anchor="w",
-        ).grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 8))
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            head,
+            text="VOICE STREAM // READ ONLY",
+            font=("Consolas", 9),
+            fg=self.colors["muted"],
+            bg=self.colors["surface"],
+        ).grid(row=0, column=1, sticky="e")
 
         self.display = scrolledtext.ScrolledText(
-            conversation,
-            bg=self.colors["input"],
+            terminal,
+            bg=self.colors["black"],
             fg=self.colors["text"],
             insertbackground=self.colors["cyan"],
             selectbackground=self.colors["border"],
             relief=tk.FLAT,
             bd=0,
-            font=("Segoe UI", 11),
+            font=("Consolas", 10),
             wrap=tk.WORD,
-            padx=14,
+            padx=12,
             pady=12,
         )
-        self.display.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        self.display.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
         self.display.tag_config("assistant", foreground=self.colors["green"])
         self.display.tag_config("user", foreground=self.colors["cyan"])
         self.display.tag_config("system", foreground=self.colors["muted"])
-        self.display.tag_config("error", foreground=self.colors["red"])
-        self.display.tag_config("label", foreground=self.colors["amber"], font=("Segoe UI", 10, "bold"))
+        self.display.tag_config("error", foreground=self.colors["red"], font=("Consolas", 10, "bold"))
+        self.display.tag_config("label", foreground=self.colors["amber"], font=("Consolas", 9, "bold"))
         self.display.config(state=tk.DISABLED)
 
-    def build_side_panel(self, parent: tk.Frame):
-        side = tk.Frame(
-            parent,
-            bg=self.colors["surface"],
-            highlightthickness=1,
-            highlightbackground=self.colors["border"],
-        )
-        side.grid(row=0, column=1, sticky="nsew")
-        side.grid_columnconfigure(0, weight=1)
+    def build_telemetry(self, parent: tk.Frame):
+        stack = tk.Frame(parent, bg=self.colors["app"])
+        stack.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+        stack.grid_columnconfigure(0, weight=1)
+        stack.grid_rowconfigure(2, weight=1)
 
-        tk.Label(
-            side,
-            text="Try saying",
-            font=("Segoe UI", 13, "bold"),
+        system = self.panel(stack)
+        system.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self.section_title(system, "SYSTEM").pack(fill=tk.X, padx=12, pady=(12, 8))
+        for key in ("HOST", "OS", "CPU", "MEM", "DISK"):
+            self.stat_row(system, key)
+
+        audio = self.panel(stack)
+        audio.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.section_title(audio, "AUDIO").pack(fill=tk.X, padx=12, pady=(12, 8))
+        for key in ("MIC", "TTS", "MODE"):
+            self.stat_row(audio, key)
+
+        activity = self.panel(stack)
+        activity.grid(row=2, column=0, sticky="nsew")
+        self.section_title(activity, "SIGNAL").pack(fill=tk.X, padx=12, pady=(12, 8))
+        self.signal_canvas = tk.Canvas(
+            activity,
+            height=170,
+            bg=self.colors["black"],
+            highlightthickness=1,
+            highlightbackground=self.colors["border_dim"],
+        )
+        self.signal_canvas.pack(fill=tk.X, padx=12, pady=(0, 12))
+        self.signal_text = tk.Label(
+            activity,
+            text="Awaiting voice input.",
+            font=("Consolas", 9),
+            fg=self.colors["muted"],
+            bg=self.colors["surface"],
+            justify=tk.LEFT,
+            anchor="nw",
+        )
+        self.signal_text.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+    def build_voice_deck(self, parent: tk.Frame):
+        deck = self.panel(parent)
+        deck.grid(row=1, column=0, columnspan=3, sticky="nsew", pady=(10, 0))
+        deck.grid_columnconfigure(1, weight=1)
+
+        self.listen_btn = tk.Button(
+            deck,
+            text="SPEAK",
+            command=self.listen_cmd,
+            bg=self.colors["cyan"],
+            fg=self.colors["black"],
+            activebackground=self.colors["green"],
+            activeforeground=self.colors["black"],
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            font=("Consolas", 13, "bold"),
+            padx=24,
+            pady=16,
+        )
+        self.listen_btn.grid(row=0, column=0, sticky="w", padx=12, pady=12)
+
+        self.deck_label = tk.Label(
+            deck,
+            text="VOICE COMMAND MODE ENABLED // KEYBOARD COMMAND INPUT DISABLED",
+            font=("Consolas", 11, "bold"),
             fg=self.colors["text"],
             bg=self.colors["surface"],
             anchor="w",
-        ).grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 8))
+        )
+        self.deck_label.grid(row=0, column=1, sticky="ew", padx=12, pady=12)
 
-        suggestions = [
-            ("System info", "system info"),
-            ("Open Notepad", "open notepad"),
-            ("List windows", "list windows"),
-            ("Weather", "weather in Lagos"),
-            ("Search web", "search for Python documentation"),
-            ("Reminder", "remind me to stretch in 10 minutes"),
-            ("Help", "help"),
-        ]
-        for row, (label, command) in enumerate(suggestions, start=1):
-            button = tk.Button(
-                side,
+        for column, (label, command) in enumerate((("CLEAR", self.clear_display), ("HELP", self.show_help)), start=2):
+            tk.Button(
+                deck,
                 text=label,
-                command=lambda value=command: self.use_suggestion(value),
+                command=command,
                 bg=self.colors["surface_alt"],
-                fg=self.colors["text"],
-                activebackground=self.colors["cyan"],
-                activeforeground=self.colors["app"],
+                fg=self.colors["cyan"],
+                activebackground=self.colors["border"],
+                activeforeground=self.colors["text"],
                 relief=tk.FLAT,
                 bd=0,
                 cursor="hand2",
-                font=("Segoe UI", 10),
-                anchor="w",
-                padx=12,
-                pady=10,
-            )
-            button.grid(row=row, column=0, sticky="ew", padx=16, pady=4)
+                font=("Consolas", 10, "bold"),
+                padx=16,
+                pady=16,
+                highlightthickness=1,
+                highlightbackground=self.colors["border"],
+            ).grid(row=0, column=column, sticky="e", padx=(0, 12), pady=12)
 
-        tk.Frame(side, height=1, bg=self.colors["border"]).grid(
-            row=8,
-            column=0,
-            sticky="ew",
-            padx=16,
-            pady=16,
-        )
-
-        self.voice_status = tk.Label(
-            side,
-            text="Voice: checking...",
-            font=("Segoe UI", 10, "bold"),
-            fg=self.colors["amber"],
-            bg=self.colors["surface"],
-            anchor="w",
-        )
-        self.voice_status.grid(row=9, column=0, sticky="ew", padx=16, pady=(0, 8))
-
-        self.system_status = tk.Label(
-            side,
-            text="System: --",
-            font=("Segoe UI", 9),
-            fg=self.colors["muted"],
-            bg=self.colors["surface"],
-            justify=tk.LEFT,
-            anchor="nw",
-        )
-        self.system_status.grid(row=10, column=0, sticky="ew", padx=16, pady=(0, 12))
-
-        follow = tk.Checkbutton(
-            side,
-            text="Keep listening after each voice command",
-            variable=self.keep_listening,
-            bg=self.colors["surface"],
-            fg=self.colors["text"],
-            activebackground=self.colors["surface"],
-            activeforeground=self.colors["text"],
-            selectcolor=self.colors["input"],
-            font=("Segoe UI", 9),
-            anchor="w",
-        )
-        follow.grid(row=11, column=0, sticky="ew", padx=12, pady=(0, 8))
-
-        tk.Label(
-            side,
-            text="Tip: use the buttons above to fill the command box, then edit or send.",
-            font=("Segoe UI", 9),
-            fg=self.colors["muted"],
-            bg=self.colors["surface"],
-            wraplength=250,
-            justify=tk.LEFT,
-            anchor="nw",
-        ).grid(row=12, column=0, sticky="ew", padx=16, pady=(4, 16))
-
-    def build_input_bar(self):
-        bar = tk.Frame(
-            self.root,
+    def panel(self, parent: tk.Widget, width: int | None = None):
+        return tk.Frame(
+            parent,
+            width=width or 1,
             bg=self.colors["surface"],
             highlightthickness=1,
             highlightbackground=self.colors["border"],
         )
-        bar.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
-        bar.grid_columnconfigure(1, weight=1)
 
-        self.listen_btn = tk.Button(
-            bar,
-            text="Speak",
-            command=self.listen_cmd,
-            bg=self.colors["cyan"],
-            fg=self.colors["app"],
-            activebackground=self.colors["green"],
-            activeforeground=self.colors["app"],
-            relief=tk.FLAT,
-            bd=0,
-            cursor="hand2",
-            font=("Segoe UI", 11, "bold"),
-            padx=18,
-            pady=12,
+    def section_title(self, parent: tk.Widget, text: str):
+        return tk.Label(
+            parent,
+            text=f"[ {text} ]",
+            font=("Consolas", 10, "bold"),
+            fg=self.colors["cyan"],
+            bg=self.colors["surface"],
+            anchor="w",
         )
-        self.listen_btn.grid(row=0, column=0, sticky="w", padx=(12, 8), pady=12)
 
-        self.input_cmd = tk.Entry(
-            bar,
-            bg=self.colors["input"],
+    def stat_row(self, parent: tk.Widget, key: str):
+        row = tk.Frame(parent, bg=self.colors["surface"])
+        row.pack(fill=tk.X, padx=12, pady=3)
+        tk.Label(
+            row,
+            text=key,
+            width=8,
+            font=("Consolas", 9, "bold"),
+            fg=self.colors["muted"],
+            bg=self.colors["surface"],
+            anchor="w",
+        ).pack(side=tk.LEFT)
+        value = tk.Label(
+            row,
+            text="--",
+            font=("Consolas", 9),
             fg=self.colors["text"],
-            insertbackground=self.colors["cyan"],
-            relief=tk.FLAT,
-            font=("Segoe UI", 12),
+            bg=self.colors["surface"],
+            anchor="e",
         )
-        self.input_cmd.grid(row=0, column=1, sticky="ew", padx=8, pady=12, ipady=11)
-        self.input_cmd.bind("<Return>", lambda _event: self.send_command())
-        self.input_cmd.insert(0, "Type a command...")
-        self.input_cmd.bind("<FocusIn>", self.clear_placeholder)
-        self.input_cmd.bind("<FocusOut>", self.restore_placeholder)
-
-        self.send_btn = tk.Button(
-            bar,
-            text="Send",
-            command=self.send_command,
-            bg=self.colors["green"],
-            fg=self.colors["app"],
-            activebackground=self.colors["cyan"],
-            activeforeground=self.colors["app"],
-            relief=tk.FLAT,
-            bd=0,
-            cursor="hand2",
-            font=("Segoe UI", 11, "bold"),
-            padx=18,
-            pady=12,
-        )
-        self.send_btn.grid(row=0, column=2, sticky="e", padx=8, pady=12)
-
-        tk.Button(
-            bar,
-            text="Clear",
-            command=self.clear_display,
-            bg=self.colors["surface_alt"],
-            fg=self.colors["text"],
-            activebackground=self.colors["border"],
-            activeforeground=self.colors["text"],
-            relief=tk.FLAT,
-            bd=0,
-            cursor="hand2",
-            font=("Segoe UI", 10),
-            padx=14,
-            pady=12,
-        ).grid(row=0, column=3, sticky="e", padx=(8, 12), pady=12)
+        value.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        self.stat_labels[key] = value
 
     def display_message(self, label, text, tag="assistant"):
         """Callback used by the assistant core."""
-        label_text = "Jarvis" if str(label).lower() == "jarvis" else str(label or "System")
-        message_tag = "assistant" if label_text == "Jarvis" else tag
+        label_text = "JARVIS" if str(label).lower() == "jarvis" else str(label or "SYSTEM").upper()
+        message_tag = "assistant" if label_text == "JARVIS" else tag
         self.add_message(label_text, text, message_tag)
 
     def add_message(self, speaker: str, text: str, tag: str = "system"):
-        """Thread-safe conversation append."""
+        """Thread-safe transcript append."""
         if threading.current_thread() is not threading.main_thread():
             self.root.after(0, lambda: self.add_message(speaker, text, tag))
             return
 
-        timestamp = datetime.now().strftime("%H:%M")
+        timestamp = datetime.now().strftime("%H:%M:%S")
         self.display.config(state=tk.NORMAL)
-        self.display.insert(tk.END, f"{speaker}  {timestamp}\n", "label")
+        self.display.insert(tk.END, f"{timestamp}  {speaker:<8}\n", "label")
         self.display.insert(tk.END, f"{text}\n\n", tag)
         self.display.see(tk.END)
         self.display.config(state=tk.DISABLED)
-
-    def use_suggestion(self, command: str):
-        self.input_cmd.delete(0, tk.END)
-        self.input_cmd.insert(0, command)
-        self.input_cmd.focus_set()
-
-    def clear_placeholder(self, _event=None):
-        if self.input_cmd.get() == "Type a command...":
-            self.input_cmd.delete(0, tk.END)
-
-    def restore_placeholder(self, _event=None):
-        if not self.input_cmd.get().strip():
-            self.input_cmd.insert(0, "Type a command...")
-
-    def current_command(self):
-        command = self.input_cmd.get().strip()
-        if command == "Type a command...":
-            return ""
-        return command
+        if hasattr(self, "signal_text"):
+            self.signal_text.config(text=f"Last event: {speaker} @ {timestamp}")
 
     def listen_cmd(self):
         """Start a voice capture."""
         if not self.jarvis:
-            self.add_message("System", "Jarvis is still starting. Try again in a moment.", "error")
+            self.add_message("SYSTEM", "Jarvis is still starting. Try again in a moment.", "error")
             return
         if not self.jarvis.microphone_available:
-            self.add_message("System", "No microphone is available. You can still type commands.", "error")
+            self.add_message("SYSTEM", "No microphone is available. Connect one to use voice commands.", "error")
             return
         if self.listening:
-            self.add_message("System", "I am already listening.", "system")
+            self.add_message("SYSTEM", "Voice channel is already open.", "system")
             return
 
         self.listening = True
-        self.set_state("Listening", "Speak now. I will process your command when you stop.", "amber")
-        self.listen_btn.config(text="Listening...", bg=self.colors["amber"])
-        self.add_message("Jarvis", "I am listening.", "assistant")
+        self.set_state("LISTENING", "SPEAK NOW // PROCESSING AFTER PAUSE", "amber")
+        self.listen_btn.config(text="LIVE", bg=self.colors["amber"], state=tk.DISABLED)
+        self.add_message("JARVIS", "Listening.", "assistant")
         threading.Thread(target=self._listen_thread, daemon=True).start()
 
     def _listen_thread(self):
@@ -427,113 +459,151 @@ class FuturisticGUI:
             assert self.jarvis is not None
             command = self.jarvis.listen()
             if command:
-                self.add_message("You", command, "user")
-                self.handle_command(command, source="voice")
+                self.add_message("YOU", command, "user")
+                self.handle_command(command)
             else:
-                self.add_message("Jarvis", "I did not catch that. Try speaking closer or type it.", "assistant")
+                self.add_message("JARVIS", "No command detected. Press SPEAK and try again.", "assistant")
         except SystemExit:
-            self.add_message("System", "Voice recognition is not available in this environment.", "error")
+            self.add_message("SYSTEM", "Voice recognition is not available in this environment.", "error")
         except Exception as exc:
-            self.add_message("System", f"Voice input failed: {exc}", "error")
+            self.add_message("SYSTEM", f"Voice input failed: {exc}", "error")
         finally:
             self.listening = False
             self.root.after(0, self.reset_voice_controls)
 
-    def send_command(self):
-        """Execute typed command."""
-        command = self.current_command()
-        if not command:
-            self.input_cmd.focus_set()
-            return
-        if not self.jarvis:
-            self.add_message("System", "Jarvis is still starting. Try again in a moment.", "error")
-            return
-
-        self.input_cmd.delete(0, tk.END)
-        self.add_message("You", command, "user")
-        self.handle_command(command, source="text")
-
-    def handle_command(self, command: str, source: str):
+    def handle_command(self, command: str):
         if self.executing:
-            self.add_message("System", "I am still working on the previous command.", "system")
+            self.add_message("SYSTEM", "Previous command is still executing.", "system")
             return
 
         self.executing = True
-        self.set_state("Working", "Running your command...", "amber")
-        self.send_btn.config(state=tk.DISABLED)
-        threading.Thread(target=lambda: self._execute_command(command, source), daemon=True).start()
+        self.set_state("EXECUTING", "RUNNING VOICE COMMAND", "amber")
+        self.listen_btn.config(state=tk.DISABLED)
+        threading.Thread(target=lambda: self._execute_command(command), daemon=True).start()
 
-    def _execute_command(self, command: str, source: str):
+    def _execute_command(self, command: str):
         try:
             assert self.jarvis is not None
             self.jarvis.handle_command(command)
-            self.add_message("Jarvis", "Anything else?", "assistant")
+            self.add_message("JARVIS", "Standing by for the next voice command.", "assistant")
         except SystemExit:
             self.root.after(0, self.quit_app)
         except Exception as exc:
-            self.add_message("System", f"Command failed: {exc}", "error")
+            self.add_message("SYSTEM", f"Command failed: {exc}", "error")
         finally:
             self.executing = False
             self.root.after(0, self.reset_after_command)
-            if source == "voice" and self.keep_listening.get():
+            if self.keep_listening.get():
                 self.root.after(900, self.listen_cmd)
 
     def reset_after_command(self):
-        self.send_btn.config(state=tk.NORMAL)
+        if self.jarvis and self.jarvis.microphone_available:
+            self.listen_btn.config(state=tk.NORMAL)
         if not self.listening:
-            self.set_state("Ready", "Ask me by voice or text.", "green")
-        self.restore_placeholder()
+            self.set_state("READY", "PRESS SPEAK // ISSUE VOICE COMMAND", "green")
 
     def reset_voice_controls(self):
-        self.listen_btn.config(text="Speak", bg=self.colors["cyan"])
+        self.listen_btn.config(text="SPEAK", bg=self.colors["cyan"])
+        if self.jarvis and self.jarvis.microphone_available and not self.executing:
+            self.listen_btn.config(state=tk.NORMAL)
         if not self.executing:
-            self.set_state("Ready", "Ask me by voice or text.", "green")
+            self.set_state("READY", "PRESS SPEAK // ISSUE VOICE COMMAND", "green")
 
     def update_voice_availability(self):
         if not self.jarvis:
             return
+        tts = self.jarvis.tts_voice_name or "UNAVAILABLE"
         if self.jarvis.microphone_available:
-            tts = self.jarvis.tts_voice_name or "system default"
-            self.voice_status.config(text=f"Voice: ready\nTTS: {tts}", fg=self.colors["green"])
+            self.voice_status.config(text=f"VOICE: READY\nTTS: {tts}", fg=self.colors["green"])
             self.listen_btn.config(state=tk.NORMAL)
+            self.set_stat("MIC", "READY")
         else:
-            tts = self.jarvis.tts_voice_name or "unavailable"
-            self.voice_status.config(text=f"Voice: unavailable\nTTS: {tts}", fg=self.colors["red"])
+            self.voice_status.config(text=f"VOICE: UNAVAILABLE\nTTS: {tts}", fg=self.colors["red"])
             self.listen_btn.config(state=tk.DISABLED, bg=self.colors["surface_alt"], fg=self.colors["muted"])
+            self.set_stat("MIC", "MISSING")
+        self.set_stat("TTS", tts)
+        self.set_stat("MODE", "VOICE ONLY")
 
     def refresh_status(self):
-        """Refresh compact machine status."""
-        host = socket.gethostname()
-        os_name = f"{platform.system()} {platform.release()}"
+        """Refresh clock, system status, and activity graph."""
+        self.clock_label.config(text=datetime.now().strftime("%H:%M:%S"))
+        self.set_stat("HOST", socket.gethostname())
+        self.set_stat("OS", f"{platform.system()} {platform.release()}")
+
         if psutil:
             cpu = psutil.cpu_percent(interval=None)
             mem = psutil.virtual_memory().percent
-            status = f"{host}\n{os_name}\nCPU {cpu:.0f}%  Memory {mem:.0f}%"
+            disk = psutil.disk_usage("/").percent
+            self.set_stat("CPU", f"{cpu:.0f}%")
+            self.set_stat("MEM", f"{mem:.0f}%")
+            self.set_stat("DISK", f"{disk:.0f}%")
         else:
-            status = f"{host}\n{os_name}"
-        self.system_status.config(text=status)
+            cpu = 18
+            mem = 36
+            self.set_stat("CPU", "--")
+            self.set_stat("MEM", "--")
+            self.set_stat("DISK", "--")
 
-        pulse_color = self.colors["amber"] if self.listening else self.colors["cyan"]
-        core_color = self.colors["amber"] if self.executing else self.colors["green"]
-        self.orb.itemconfig(self.voice_ring, outline=pulse_color)
-        self.orb.itemconfig(self.voice_core, fill=core_color)
-
+        self.draw_signal(cpu, mem)
         self.root.after(1200, self.refresh_status)
+
+    def draw_signal(self, cpu: float, mem: float):
+        if not hasattr(self, "signal_canvas"):
+            return
+        canvas = self.signal_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 260)
+        height = max(canvas.winfo_height(), 140)
+        step = max(width // 28, 8)
+
+        for index, x in enumerate(range(8, width - 8, step)):
+            value = (int(cpu) + int(mem) + index * 9) % 100
+            bar = int((value / 100) * (height - 26))
+            color = self.colors["amber"] if self.listening or value > 78 else self.colors["cyan"]
+            canvas.create_rectangle(
+                x,
+                height - bar - 8,
+                x + step - 3,
+                height - 8,
+                outline=color,
+                fill=self.colors["surface_alt"],
+            )
+        canvas.create_text(
+            10,
+            10,
+            text="VOICE/SYSTEM SIGNAL",
+            fill=self.colors["muted"],
+            anchor="nw",
+            font=("Consolas", 8, "bold"),
+        )
+
+    def set_stat(self, key: str, value: str):
+        label = self.stat_labels.get(key)
+        if label:
+            label.config(text=value)
 
     def set_state(self, state: str, detail: str, color_key: str):
         color = self.colors[color_key]
         self.state_label.config(text=state, fg=color)
         self.state_detail.config(text=detail)
 
+    def animate(self):
+        self.pulse = not self.pulse
+        ring = self.colors["cyan"] if self.pulse else self.colors["border"]
+        core = self.colors["amber"] if self.listening or self.executing else self.colors["green"]
+        self.orb.itemconfig(self.voice_ring, outline=ring)
+        self.orb.itemconfig(self.voice_core, fill=core)
+        self.root.after(700, self.animate)
+
     def clear_display(self):
         self.display.config(state=tk.NORMAL)
         self.display.delete("1.0", tk.END)
         self.display.config(state=tk.DISABLED)
-        self.add_message("Jarvis", "Conversation cleared. What should we do next?", "assistant")
+        self.add_message("JARVIS", "Transcript cleared. Voice channel standing by.", "assistant")
 
     def show_help(self):
         help_text = (
-            "Useful commands:\n\n"
+            "Voice commands to try:\n\n"
             "open notepad\n"
             "list windows\n"
             "focus chrome\n"
@@ -544,7 +614,7 @@ class FuturisticGUI:
             "remind me to stretch in 10 minutes\n"
             "tell me a joke"
         )
-        messagebox.showinfo("Jarvis Help", help_text)
+        messagebox.showinfo("Jarvis Voice Commands", help_text)
 
     def quit_app(self):
         if messagebox.askokcancel("Shutdown", "Shut down Jarvis?"):
