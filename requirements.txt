@@ -3,6 +3,7 @@ SpeechRecognition
 pyaudio
 opencv-python
 requests
+python-dotenv
 transformers
 pygetwindow
 pyautogui

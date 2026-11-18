@@ -5,6 +5,7 @@ import time
 import random
 import logging
 import threading
+import queue
 import webbrowser
 import subprocess
 import shutil
@@ -12,6 +13,11 @@ import platform
 from pathlib import Path
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
 
 try:
     import pyttsx3  # type: ignore
@@ -60,19 +66,47 @@ except ImportError:
     psutil = None
 
 DATA_FILE = Path(__file__).resolve().parents[2] / 'jarvis_data.json'
+PROJECT_ROOT = DATA_FILE.parent
+
+
+def load_local_configuration():
+    """Load shared settings followed by machine-specific local settings."""
+    if not load_dotenv:
+        logging.warning('python-dotenv is unavailable; using system environment settings only.')
+        return
+    load_dotenv(PROJECT_ROOT / '.env', override=False)
+    load_dotenv(PROJECT_ROOT / '.env.local', override=True)
+
+
+load_local_configuration()
 
 
 class LocalLLM:
     def __init__(self, model_path=None):
         self.model_path = model_path or os.getenv('JARVIS_LOCAL_MODEL_PATH')
+        self.ollama_host = os.getenv('JARVIS_OLLAMA_HOST', 'http://127.0.0.1:11434').rstrip('/')
+        self.ollama_model = os.getenv('JARVIS_OLLAMA_MODEL', 'qwen2.5-coder:7b').strip()
         self.engine = None
         self.tokenizer = None
         self.model = None
+        self.backend = None
         self.ready = False
+        self.conversation = [{
+            'role': 'system',
+            'content': (
+                'You are Jarvis, a warm and capable voice assistant. '
+                'Reply naturally and concisely because responses are spoken aloud. '
+                'Keep context from the conversation and ask one helpful follow-up only when needed.'
+            ),
+        }]
+
+        if self._connect_ollama():
+            return
 
         if Llama and self.model_path:
             try:
                 self.engine = Llama(model_path=self.model_path)
+                self.backend = 'llama.cpp'
                 self.ready = True
             except Exception:
                 self.engine = None
@@ -81,12 +115,50 @@ class LocalLLM:
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(self.model_path, local_files_only=True)
                 self.model = AutoModelForCausalLM.from_pretrained(self.model_path, local_files_only=True)
+                self.backend = 'transformers'
                 self.ready = True
             except Exception:
                 self.tokenizer = None
                 self.model = None
 
+    def _connect_ollama(self):
+        """Use a locally running Ollama model when the configured model is present."""
+        if not requests or not self.ollama_model:
+            return False
+        try:
+            response = requests.get(f'{self.ollama_host}/api/tags', timeout=2)
+            response.raise_for_status()
+            installed_models = {item.get('name') for item in response.json().get('models', [])}
+            if self.ollama_model not in installed_models:
+                return False
+        except Exception as exc:
+            logging.info('Ollama unavailable: %s', exc)
+            return False
+
+        self.backend = 'ollama'
+        self.ready = True
+        return True
+
     def generate(self, prompt, max_tokens=200):
+        if self.backend == 'ollama':
+            try:
+                response = requests.post(
+                    f'{self.ollama_host}/api/generate',
+                    json={
+                        'model': self.ollama_model,
+                        'prompt': prompt,
+                        'stream': False,
+                        'options': {'num_predict': max_tokens},
+                    },
+                    timeout=120,
+                )
+                response.raise_for_status()
+                answer = response.json().get('response', '').strip()
+                return answer or self.fallback(prompt)
+            except Exception as exc:
+                logging.warning('Ollama generation failed: %s', exc)
+                return self.fallback(prompt)
+
         if self.ready and self.engine:
             try:
                 response = self.engine.complete(prompt=prompt, max_tokens=max_tokens)
@@ -103,6 +175,39 @@ class LocalLLM:
                 return self.fallback(prompt)
 
         return self.fallback(prompt)
+
+    def chat(self, message, max_tokens=300):
+        """Continue a natural multi-turn conversation through Ollama."""
+        if self.backend != 'ollama':
+            return self.generate(message, max_tokens)
+
+        self.conversation.append({'role': 'user', 'content': message})
+        try:
+            response = requests.post(
+                f'{self.ollama_host}/api/chat',
+                json={
+                    'model': self.ollama_model,
+                    'messages': self.conversation,
+                    'stream': False,
+                    'options': {'num_predict': max_tokens},
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            answer = response.json().get('message', {}).get('content', '').strip()
+            if not answer:
+                return self.fallback(message)
+            self.conversation.append({'role': 'assistant', 'content': answer})
+            self.conversation = self.conversation[:1] + self.conversation[-12:]
+            return answer
+        except Exception as exc:
+            logging.warning('Ollama chat failed: %s', exc)
+            self.conversation.pop()
+            return self.fallback(message)
+
+    def clear_conversation(self):
+        """Start a fresh voice-chat session without restarting Jarvis."""
+        self.conversation = self.conversation[:1]
 
     @staticmethod
     def fallback(prompt):
@@ -338,6 +443,11 @@ class Jarvis:
         self.voice_enabled = bool(pyttsx3)
         self.tts_engine = None
         self.tts_voice_name = None
+        # pyttsx3 owns a single event loop. Several commands can complete on
+        # background threads, so all speech must pass through one gate.
+        self.tts_lock = threading.RLock()
+        self.tts_queue: queue.Queue[tuple[str, threading.Event | None]] = queue.Queue()
+        self.tts_worker: threading.Thread | None = None
         self.recognizer = sr.Recognizer() if sr else None
         self.microphone_available = False
         self.user_name = None
@@ -395,6 +505,8 @@ class Jarvis:
             self.tts_engine.setProperty('rate', int(os.getenv('JARVIS_VOICE_RATE', '170')))
             self.tts_engine.setProperty('volume', float(os.getenv('JARVIS_VOICE_VOLUME', '1.0')))
             self.voice_enabled = True
+            self.tts_worker = threading.Thread(target=self._run_tts_queue, daemon=True)
+            self.tts_worker.start()
         except Exception as e:
             logging.warning('Text-to-speech unavailable: %s', e)
             self.tts_engine = None
@@ -467,16 +579,37 @@ class Jarvis:
     def save_data(self):
         DATA_FILE.write_text(json.dumps(self.data, indent=2))
 
-    def speak(self, text):
-        print('Jarvis:', text)
-        if self.gui_callback:
-            self.gui_callback("Jarvis", text)
-        if self.voice_enabled and self.tts_engine:
+    def _run_tts_queue(self):
+        """Speak queued replies one at a time without blocking command handling."""
+        while True:
+            text, finished = self.tts_queue.get()
             try:
-                self.tts_engine.say(text)
-                self.tts_engine.runAndWait()
+                if self.tts_engine:
+                    with self.tts_lock:
+                        self.tts_engine.say(text)
+                        self.tts_engine.runAndWait()
             except Exception as e:
                 logging.warning('Text-to-speech failed: %s', e)
+            finally:
+                if finished:
+                    finished.set()
+                self.tts_queue.task_done()
+
+    def speak(self, text, wait=False):
+        """Show a response immediately and play it without delaying the command."""
+        print('Jarvis:', text)
+        if self.gui_callback:
+            try:
+                self.gui_callback("Jarvis", text)
+            except Exception as e:
+                # A transcript rendering failure should not prevent the
+                # spoken response from reaching the user.
+                logging.warning('Transcript update failed: %s', e)
+        if self.voice_enabled and self.tts_engine:
+            finished = threading.Event() if wait else None
+            self.tts_queue.put((text, finished))
+            if finished:
+                finished.wait()
 
     def listen(self):
         if not self.recognizer or not sr:
@@ -485,7 +618,8 @@ class Jarvis:
 
         try:
             with sr.Microphone() as source:
-                self.speak('Listening now.')
+                # Let the prompt finish before we begin recording it.
+                self.speak('Listening now.', wait=True)
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
                 audio = self.recognizer.listen(source, timeout=8, phrase_time_limit=10)
 
@@ -565,7 +699,11 @@ class Jarvis:
             now = datetime.now()
             changed = False
             for reminder in list(self.data.get('reminders', [])):
-                due = datetime.fromisoformat(reminder['time'])
+                try:
+                    due = datetime.fromisoformat(reminder['time'])
+                except (KeyError, TypeError, ValueError):
+                    logging.warning('Ignoring reminder with an invalid time: %r', reminder)
+                    continue
                 if now >= due and not reminder.get('shown'):
                     self.speak(f"Reminder: {reminder['text']}")
                     reminder['shown'] = True
@@ -692,14 +830,22 @@ class Jarvis:
             self.speak('What should I remind you about?')
             text = self.listen()
         if 'remind me to' in text:
-            parts = text.split('remind me to', 1)[1].strip()
-            dt = self.parse_datetime(parts)
+            task = text.split('remind me to', 1)[1].strip()
+            dt = self.parse_datetime(task)
             if not dt:
                 self.speak('When should I remind you? You can say "in 10 minutes" or "tomorrow at 9am".')
-                parts = self.listen()
-                dt = self.parse_datetime(parts)
+                schedule = self.listen()
+                dt = self.parse_datetime(schedule)
             if dt:
-                self.data['reminders'].append({'text': parts, 'time': dt.isoformat(), 'shown': False})
+                # Keep the requested task when the schedule was provided in a
+                # separate reply instead of replacing it with the time phrase.
+                reminder_text = re.sub(
+                    r'\s+(?:in \d+ (?:minute|minutes|hour|hours|day|days)|tomorrow(?: at .*)?)\s*$',
+                    '',
+                    task,
+                    flags=re.IGNORECASE,
+                ) or task
+                self.data['reminders'].append({'text': reminder_text, 'time': dt.isoformat(), 'shown': False})
                 self.save_data()
                 self.speak(f'Reminder set for {dt.strftime("%Y-%m-%d %H:%M")}.')
                 return
@@ -796,6 +942,7 @@ class Jarvis:
             self.speak('Cannot open camera.')
             return
         self.speak('Starting face detection. Press Q to stop.')
+        faces = []
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -969,6 +1116,8 @@ class Jarvis:
             return self.calendar_command(normalized)
         if any(keyword in normalized for keyword in ('remind', 'reminder', 'remember')):
             return self.reminder_command(normalized)
+        if any(keyword in normalized for keyword in ('list windows', 'show windows', 'open windows')):
+            return self.list_open_windows(normalized)
         if any(keyword in normalized for keyword in ('open', 'launch', 'start', 'run')):
             return self.open_app(normalized)
         if any(keyword in normalized for keyword in ('search', 'google', 'find', 'look up')):
@@ -983,8 +1132,6 @@ class Jarvis:
             return self.close_app(normalized)
         if any(keyword in normalized for keyword in ('focus', 'bring', 'switch')):
             return self.focus_app(normalized)
-        if any(keyword in normalized for keyword in ('list windows', 'show windows', 'open windows')):
-            return self.list_open_windows(normalized)
         if any(keyword in normalized for keyword in ('volume', 'sound')):
             return self.volume_command(normalized)
         if any(keyword in normalized for keyword in ('brightness', 'screen brightness')):
@@ -1001,7 +1148,7 @@ class Jarvis:
     def handle_generic_request(self, text):
         if self.llm.ready:
             self.speak('Let me think about that.')
-            answer = self.llm.generate(
+            answer = self.llm.chat(text) if self.llm.backend == 'ollama' else self.llm.generate(
                 f'You are a helpful assistant named Jarvis. The user said: "{text}". Respond as helpfully as possible.'
             )
             self.speak(answer)
